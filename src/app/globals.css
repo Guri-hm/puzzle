@@ -63,6 +63,10 @@ body {
   filter: blur(8px);
 }
 
+.puzzle-tile .absolute {
+  pointer-events: none;
+}
+
 /* Hint Arrow */
 .hint-arrow {
   position: absolute;

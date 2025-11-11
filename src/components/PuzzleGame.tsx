@@ -32,24 +32,26 @@ interface LeaderboardEntry {
 
 export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
   const [state, setState] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8, EMPTY])
+  const [initialState, setInitialState] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8, EMPTY])
   const [emptyPos, setEmptyPos] = useState(EMPTY)
   const [moves, setMoves] = useState(0)
   const [hints, setHints] = useState(0)
   const [startTime, setStartTime] = useState<number | null>(null)
   const [elapsedTime, setElapsedTime] = useState(0)
   const [isBlurred, setIsBlurred] = useState(true)
+  const [isStarted, setIsStarted] = useState(false)
   const [hintArrow, setHintArrow] = useState<{ pos: number; direction: string } | null>(null)
   const [isWon, setIsWon] = useState(false)
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
 
   // タイマー更新
   useEffect(() => {
-    if (!startTime || isWon) return
+    if (!startTime || isWon || !isStarted) return
     const timer = setInterval(() => {
       setElapsedTime(Date.now() - startTime)
     }, 100)
     return () => clearInterval(timer)
-  }, [startTime, isWon])
+  }, [startTime, isWon, isStarted])
 
   // リーダーボード読み込み
   useEffect(() => {
@@ -113,33 +115,94 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
     }
 
     setState(current)
+    setInitialState([...current])
     setEmptyPos(empty)
     setMoves(0)
     setHints(0)
-    setStartTime(Date.now())
+    setStartTime(null)
     setElapsedTime(0)
     setIsBlurred(true)
+    setIsStarted(false)
     setHintArrow(null)
     setIsWon(false)
   }, [])
 
-  // タイルクリック
-  const handleTileClick = (tileNum: number) => {
-    if (isWon || tileNum === EMPTY) return
+  // 開始ボタン
+  const handleStart = () => {
+    setIsBlurred(false)
+    setIsStarted(true)
+    setStartTime(Date.now())
+  }
 
-    const canMove = neighbors[emptyPos].includes(tileNum)
-    if (!canMove) return
+  // やり直しボタン
+  const handleRestart = () => {
+    setState([...initialState])
+    setEmptyPos(initialState.indexOf(EMPTY))
+    setHintArrow(null)
+  }
+
+  // タイルクリック（空のマスをクリックして隣接タイルを移動）
+  const handleTileClick = (posIdx: number) => {
+    if (isWon || !isStarted) return
+
+    const tileNum = state[posIdx]
+    if (tileNum !== EMPTY) return // 空マス以外はクリック不可
+
+    // 空マスの隣接位置を取得
+    const emptyIdx = posIdx
+    const emptyRow = Math.floor(emptyIdx / SIZE)
+    const emptyCol = emptyIdx % SIZE
+
+    // 上下左右の隣接タイルを探す
+    const adjacentPositions = [
+      { row: emptyRow - 1, col: emptyCol }, // 上
+      { row: emptyRow + 1, col: emptyCol }, // 下
+      { row: emptyRow, col: emptyCol - 1 }, // 左
+      { row: emptyRow, col: emptyCol + 1 }, // 右
+    ]
+
+    const movableTiles: { idx: number; tileNum: number }[] = []
+    for (const pos of adjacentPositions) {
+      if (pos.row >= 0 && pos.row < SIZE && pos.col >= 0 && pos.col < SIZE) {
+        const idx = pos.row * SIZE + pos.col
+        const tile = state[idx]
+        if (tile !== EMPTY) {
+          movableTiles.push({ idx, tileNum: tile })
+        }
+      }
+    }
+
+    // クリック可能なタイルがあれば、最初の1つを移動（実際のUIでは選択UIが必要だが、今回は自動選択）
+    // より良いUX: タイルをクリックした方が直感的
+  }
+
+  // タイルクリック（タイル自体をクリックして空マスに移動）
+  const handleTileClickDirect = (tileNum: number) => {
+    if (isWon || tileNum === EMPTY || !isStarted) return
+
+    // タイルの位置を取得
+    const tileIdx = state.indexOf(tileNum)
+    const emptyIdx = state.indexOf(EMPTY)
+
+    const tileRow = Math.floor(tileIdx / SIZE)
+    const tileCol = tileIdx % SIZE
+    const emptyRow = Math.floor(emptyIdx / SIZE)
+    const emptyCol = emptyIdx % SIZE
+
+    // 隣接チェック（上下左右のみ）
+    const isAdjacent =
+      (Math.abs(tileRow - emptyRow) === 1 && tileCol === emptyCol) ||
+      (Math.abs(tileCol - emptyCol) === 1 && tileRow === emptyRow)
+
+    if (!isAdjacent) return
 
     const newState = [...state]
-    const tileIdx = newState.indexOf(tileNum)
-    const emptyIdx = newState.indexOf(emptyPos)
-    newState[tileIdx] = emptyPos
+    newState[tileIdx] = EMPTY
     newState[emptyIdx] = tileNum
 
     setState(newState)
     setEmptyPos(tileNum)
     setMoves(moves + 1)
-    setIsBlurred(false)
     setHintArrow(null)
   }
 
@@ -243,7 +306,7 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
             <div>🚶 {moves} 手</div>
             <div>💡 {hints} ヒント</div>
           </div>
-          <div className="flex justify-center gap-4">
+          <div className="flex justify-center gap-4 flex-wrap">
             <button
               onClick={shuffle}
               className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-bold transition"
@@ -251,9 +314,23 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
               シャッフル
             </button>
             <button
+              onClick={handleStart}
+              disabled={isStarted}
+              className="bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              開始
+            </button>
+            <button
+              onClick={handleRestart}
+              disabled={!isStarted || isWon}
+              className="bg-orange-600 hover:bg-orange-700 px-6 py-2 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              やり直し
+            </button>
+            <button
               onClick={getHint}
-              disabled={isWon}
-              className="bg-green-600 hover:bg-green-700 px-6 py-2 rounded-lg font-bold transition disabled:opacity-50"
+              disabled={isWon || !isStarted}
+              className="bg-green-600 hover:bg-green-700 px-6 py-2 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               ヒント
             </button>
@@ -261,8 +338,31 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
         </div>
 
         <div className="flex flex-col lg:flex-row gap-8 items-start justify-center">
+          {/* 見本ボード */}
+          <div className="flex-shrink-0">
+            <h2 className="text-xl font-bold mb-4 text-center">見本</h2>
+            <div className="puzzle-grid mx-auto">
+              {[1, 2, 3, 4, 5, 6, 7, 8, EMPTY].map((tileNum, idx) => (
+                <div
+                  key={idx}
+                  className={`puzzle-tile ${tileNum === EMPTY ? 'empty' : ''}`}
+                >
+                  {tileNum !== EMPTY && (
+                    <>
+                      <img src={imagePaths[tileNum - 1]} alt={`Tile ${tileNum}`} />
+                      <div className="absolute top-1 left-1 bg-black bg-opacity-60 text-white text-xs px-1.5 py-0.5 rounded font-bold">
+                        {tileNum}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* ゲームボード */}
           <div className="flex-shrink-0">
+            <h2 className="text-xl font-bold mb-4 text-center">プレイ</h2>
             <div className="puzzle-grid mx-auto">
               {state.map((tileNum, idx) => (
                 <div
@@ -270,10 +370,15 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
                   className={`puzzle-tile ${tileNum === EMPTY ? 'empty' : ''} ${
                     isBlurred && tileNum !== EMPTY ? 'blurred' : ''
                   }`}
-                  onClick={() => handleTileClick(tileNum)}
+                  onClick={() => handleTileClickDirect(tileNum)}
                 >
                   {tileNum !== EMPTY && (
-                    <img src={imagePaths[tileNum - 1]} alt={`Tile ${tileNum}`} />
+                    <>
+                      <img src={imagePaths[tileNum - 1]} alt={`Tile ${tileNum}`} />
+                      <div className="absolute top-1 left-1 bg-black bg-opacity-60 text-white text-xs px-1.5 py-0.5 rounded font-bold">
+                        {tileNum}
+                      </div>
+                    </>
                   )}
                   {hintArrow && hintArrow.pos === tileNum && (
                     <div className="hint-arrow">{hintArrow.direction}</div>
