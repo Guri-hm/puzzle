@@ -518,7 +518,7 @@ export default function PuzzleGame({ puzzleId, imagePaths, size }: PuzzleGamePro
               {formatTime(elapsedTime)}
             </div>
             <div className="flex items-center gap-1">
-              <span className="material-symbols-outlined text-xl">footprints</span>
+              <span className="material-symbols-outlined text-xl">pan_tool_alt</span>
               {moves} 手
             </div>
             <div className="flex items-center gap-1">

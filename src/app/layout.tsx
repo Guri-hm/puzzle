@@ -2,7 +2,7 @@ import './globals.css'
 import { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'スライドパズル - Puzzle Gallery',
+  title: '8パズル - ギャラリー',
   description: '画像を並べ替えるスライドパズルゲーム。3×3から5×5まで様々な難易度に挑戦しよう！',
   icons: {
     icon: '/favicon.svg',

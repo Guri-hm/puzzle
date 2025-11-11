@@ -105,9 +105,6 @@ export default function Home() {
             </div>
             <h1 className="text-xl font-bold">パズルギャラリー</h1>
           </div>
-          <div className="text-sm text-slate-400">
-            選択してプレイ
-          </div>
         </div>
       </div>
 
@@ -115,7 +112,7 @@ export default function Home() {
         {/* タイトルセクション */}
         <div className="mb-16 text-center">
           <h2 className="text-5xl font-bold mb-4 bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-            スライドパズル
+            8パズル
           </h2>
           <p className="text-slate-400 text-lg">
             タイルをスライドさせて、画像を完成させよう
@@ -125,7 +122,7 @@ export default function Home() {
         {/* パズル選択カルーセル */}
         <div className="mb-12">
           <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-6">
-            ステージを選択
+            パズルを選択
           </h3>
           
           <div className="relative">
