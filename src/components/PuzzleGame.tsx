@@ -1,26 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-
-const EMPTY = 9
-const SIZE = 3
-
-// 隣接マップ
-const neighbors: { [key: number]: number[] } = {
-  1: [2, 4],
-  2: [1, 3, 5],
-  3: [2, 6],
-  4: [1, 5, 7],
-  5: [2, 4, 6, 8],
-  6: [3, 5, 9],
-  7: [4, 8],
-  8: [5, 7, 9],
-  9: [6, 8],
-}
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 
 interface PuzzleGameProps {
   puzzleId: string
   imagePaths: string[]
+  size: number
 }
 
 interface LeaderboardEntry {
@@ -30,10 +15,87 @@ interface LeaderboardEntry {
   date: string
 }
 
-export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
-  const [state, setState] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8, EMPTY])
-  const [initialState, setInitialState] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8, EMPTY])
-  const [emptyPos, setEmptyPos] = useState(EMPTY)
+// 隣接マップを動的に生成
+function generateNeighbors(size: number): { [key: number]: number[] } {
+  const neighbors: { [key: number]: number[] } = {}
+  const total = size * size
+
+  for (let i = 0; i < total; i++) {
+    const row = Math.floor(i / size)
+    const col = i % size
+    const adj: number[] = []
+
+    if (col > 0) adj.push(i - 1) // 左
+    if (col < size - 1) adj.push(i + 1) // 右
+    if (row > 0) adj.push(i - size) // 上
+    if (row < size - 1) adj.push(i + size) // 下
+
+    neighbors[i] = adj
+  }
+
+  return neighbors
+}
+
+// 逆順の数を数える（解法存在チェック用）
+function countInversions(arr: number[], empty: number): number {
+  let inversions = 0
+  const filtered = arr.filter(x => x !== empty)
+  for (let i = 0; i < filtered.length; i++) {
+    for (let j = i + 1; j < filtered.length; j++) {
+      if (filtered[i] > filtered[j]) {
+        inversions++
+      }
+    }
+  }
+  return inversions
+}
+
+// 解法が存在するか
+function isSolvable(arr: number[], empty: number, size: number): boolean {
+  const inversions = countInversions(arr, empty)
+  
+  if (size % 2 === 1) {
+    // 奇数サイズ: 逆順が偶数なら解ける
+    return inversions % 2 === 0
+  } else {
+    // 偶数サイズ: 空白の行位置も考慮
+    const emptyRow = Math.floor(arr.indexOf(empty) / size)
+    const emptyFromBottom = size - emptyRow
+    return (inversions + emptyFromBottom) % 2 === 1
+  }
+}
+
+export default function PuzzleGame({ puzzleId, imagePaths, size }: PuzzleGameProps) {
+  const EMPTY = size * size
+  const neighbors = useMemo(() => generateNeighbors(size), [size])
+
+  // 初期シャッフル済み状態を生成
+  const generateInitialState = () => {
+    let current = Array.from({ length: size * size }, (_, i) => i + 1)
+    current[size * size - 1] = EMPTY
+    let emptyIdx = current.indexOf(EMPTY)
+
+    for (let i = 0; i < 200; i++) {
+      const moveOptions = neighbors[emptyIdx] || []
+      const randomIdx = moveOptions[Math.floor(Math.random() * moveOptions.length)]
+      const temp = current[emptyIdx]
+      current[emptyIdx] = current[randomIdx]
+      current[randomIdx] = temp
+      emptyIdx = randomIdx
+    }
+
+    return { state: current, emptyPos: emptyIdx }
+  }
+
+  const [state, setState] = useState<number[]>(() => generateInitialState().state)
+  const [initialState, setInitialState] = useState<number[]>(() => {
+    const init = generateInitialState()
+    return init.state
+  })
+  const [emptyPos, setEmptyPos] = useState(() => {
+    const init = generateInitialState()
+    return init.emptyPos
+  })
   const [moves, setMoves] = useState(0)
   const [hints, setHints] = useState(0)
   const [startTime, setStartTime] = useState<number | null>(null)
@@ -43,6 +105,9 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
   const [hintArrow, setHintArrow] = useState<{ pos: number; direction: string } | null>(null)
   const [isWon, setIsWon] = useState(false)
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
+  const [draggedTile, setDraggedTile] = useState<number | null>(null)
+  const [animatingTiles, setAnimatingTiles] = useState<Set<number>>(new Set())
+  const hintTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // タイマー更新
   useEffect(() => {
@@ -97,26 +162,52 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
     }
   }
 
-  // シャッフル
-  const shuffle = useCallback(() => {
-    let current = [1, 2, 3, 4, 5, 6, 7, 8, EMPTY]
-    let empty = EMPTY
+  // 転倒数を計算（空マスを除外）- 不要（上で定義済み）
+  // const countInversions = (arr: number[]): number => {
+  //   const filtered = arr.filter((num) => num !== EMPTY)
+  //   let inversions = 0
+  //   for (let i = 0; i < filtered.length; i++) {
+  //     for (let j = i + 1; j < filtered.length; j++) {
+  //       if (filtered[i] > filtered[j]) {
+  //         inversions++
+  //       }
+  //     }
+  //   }
+  //   return inversions
+  // }
 
+  // 解法可能かチェック（転倒数が偶数なら解法可能）- 不要（上で定義済み）
+  // const isSolvable = (arr: number[]): boolean => {
+  //   return countInversions(arr) % 2 === 0
+  // }
+
+  // シャッフル実行（内部関数）
+  const performShuffle = () => {
+    let current = Array.from({ length: size * size }, (_, i) => i + 1)
+    current[size * size - 1] = EMPTY
+    let emptyIdx = current.indexOf(EMPTY) // 0-indexed位置
+
+    // ランダムに200回移動してシャッフル
+    // 有効な移動のみを行うため、転倒数の偶奇が変わらず、必ず解ける
     for (let i = 0; i < 200; i++) {
-      const moveOptions = neighbors[empty].filter((pos) => {
-        const idx = current.indexOf(pos)
-        return idx !== -1
-      })
-      const randomPos = moveOptions[Math.floor(Math.random() * moveOptions.length)]
-      const idx = current.indexOf(randomPos)
-      current[current.indexOf(empty)] = randomPos
-      current[idx] = empty
-      empty = randomPos
+      const moveOptions = neighbors[emptyIdx] || []
+      const randomIdx = moveOptions[Math.floor(Math.random() * moveOptions.length)]
+      
+      // タイルを交換
+      const temp = current[emptyIdx]
+      current[emptyIdx] = current[randomIdx]
+      current[randomIdx] = temp
+      emptyIdx = randomIdx
     }
 
     setState(current)
     setInitialState([...current])
-    setEmptyPos(empty)
+    setEmptyPos(emptyIdx)
+  }
+
+  // シャッフルボタン
+  const shuffle = useCallback(() => {
+    performShuffle()
     setMoves(0)
     setHints(0)
     setStartTime(null)
@@ -134,60 +225,55 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
     setStartTime(Date.now())
   }
 
-  // やり直しボタン
+  // やり直しボタン（配置のみ初期状態に戻す。タイマー・手数・ヒントは継続）
   const handleRestart = () => {
     setState([...initialState])
     setEmptyPos(initialState.indexOf(EMPTY))
+    if (hintTimeoutRef.current) {
+      clearTimeout(hintTimeoutRef.current)
+      hintTimeoutRef.current = null
+    }
     setHintArrow(null)
   }
 
-  // タイルクリック（空のマスをクリックして隣接タイルを移動）
-  const handleTileClick = (posIdx: number) => {
-    if (isWon || !isStarted) return
+  // タイル移動処理（アニメーション付き）
+  const moveTile = (tileNum: number) => {
+    const tileIdx = state.indexOf(tileNum)
+    const emptyIdx = state.indexOf(EMPTY)
 
-    const tileNum = state[posIdx]
-    if (tileNum !== EMPTY) return // 空マス以外はクリック不可
+    // アニメーション中フラグを立てる
+    setAnimatingTiles(prev => new Set(prev).add(tileNum))
 
-    // 空マスの隣接位置を取得
-    const emptyIdx = posIdx
-    const emptyRow = Math.floor(emptyIdx / SIZE)
-    const emptyCol = emptyIdx % SIZE
+    const newState = [...state]
+    newState[tileIdx] = EMPTY
+    newState[emptyIdx] = tileNum
 
-    // 上下左右の隣接タイルを探す
-    const adjacentPositions = [
-      { row: emptyRow - 1, col: emptyCol }, // 上
-      { row: emptyRow + 1, col: emptyCol }, // 下
-      { row: emptyRow, col: emptyCol - 1 }, // 左
-      { row: emptyRow, col: emptyCol + 1 }, // 右
-    ]
+    setState(newState)
+    setEmptyPos(tileNum)
+    setMoves(prev => prev + 1)
 
-    const movableTiles: { idx: number; tileNum: number }[] = []
-    for (const pos of adjacentPositions) {
-      if (pos.row >= 0 && pos.row < SIZE && pos.col >= 0 && pos.col < SIZE) {
-        const idx = pos.row * SIZE + pos.col
-        const tile = state[idx]
-        if (tile !== EMPTY) {
-          movableTiles.push({ idx, tileNum: tile })
-        }
-      }
-    }
-
-    // クリック可能なタイルがあれば、最初の1つを移動（実際のUIでは選択UIが必要だが、今回は自動選択）
-    // より良いUX: タイルをクリックした方が直感的
+    // アニメーション完了後にフラグを解除
+    setTimeout(() => {
+      setAnimatingTiles(prev => {
+        const next = new Set(prev)
+        next.delete(tileNum)
+        return next
+      })
+    }, 200) // CSSのtransition時間と一致
   }
 
   // タイルクリック（タイル自体をクリックして空マスに移動）
   const handleTileClickDirect = (tileNum: number) => {
-    if (isWon || tileNum === EMPTY || !isStarted) return
+    if (isWon || tileNum === EMPTY || !isStarted || animatingTiles.size > 0) return
 
     // タイルの位置を取得
     const tileIdx = state.indexOf(tileNum)
     const emptyIdx = state.indexOf(EMPTY)
 
-    const tileRow = Math.floor(tileIdx / SIZE)
-    const tileCol = tileIdx % SIZE
-    const emptyRow = Math.floor(emptyIdx / SIZE)
-    const emptyCol = emptyIdx % SIZE
+    const tileRow = Math.floor(tileIdx / size)
+    const tileCol = tileIdx % size
+    const emptyRow = Math.floor(emptyIdx / size)
+    const emptyCol = emptyIdx % size
 
     // 隣接チェック（上下左右のみ）
     const isAdjacent =
@@ -196,96 +282,214 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
 
     if (!isAdjacent) return
 
-    const newState = [...state]
-    newState[tileIdx] = EMPTY
-    newState[emptyIdx] = tileNum
-
-    setState(newState)
-    setEmptyPos(tileNum)
-    setMoves(moves + 1)
+    if (hintTimeoutRef.current) {
+      clearTimeout(hintTimeoutRef.current)
+      hintTimeoutRef.current = null
+    }
     setHintArrow(null)
+
+    moveTile(tileNum)
   }
 
-  // ヒント計算（A*アルゴリズム）
+  // ドラッグ開始
+  const handleDragStart = (e: React.DragEvent, tileNum: number) => {
+    if (isWon || tileNum === EMPTY || !isStarted) {
+      e.preventDefault()
+      return
+    }
+    setDraggedTile(tileNum)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  // ドラッグオーバー
+  const handleDragOver = (e: React.DragEvent, tileNum: number) => {
+    if (tileNum === EMPTY && draggedTile !== null) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+    }
+  }
+
+  // ドロップ
+  const handleDrop = (e: React.DragEvent, targetTileNum: number) => {
+    e.preventDefault()
+    if (draggedTile === null || targetTileNum !== EMPTY || animatingTiles.size > 0) return
+
+    // ドラッグされたタイルと空マスが隣接しているか確認
+    const tileIdx = state.indexOf(draggedTile)
+    const emptyIdx = state.indexOf(EMPTY)
+
+    const tileRow = Math.floor(tileIdx / size)
+    const tileCol = tileIdx % size
+    const emptyRow = Math.floor(emptyIdx / size)
+    const emptyCol = emptyIdx % size
+
+    const isAdjacent =
+      (Math.abs(tileRow - emptyRow) === 1 && tileCol === emptyCol) ||
+      (Math.abs(tileCol - emptyCol) === 1 && tileRow === emptyRow)
+
+    if (isAdjacent) {
+      if (hintTimeoutRef.current) {
+        clearTimeout(hintTimeoutRef.current)
+        hintTimeoutRef.current = null
+      }
+      setHintArrow(null)
+
+      moveTile(draggedTile)
+    }
+
+    setDraggedTile(null)
+  }
+
+  // ドラッグ終了
+  const handleDragEnd = () => {
+    setDraggedTile(null)
+  }
+
+  // ヒント計算（A*アルゴリズム）- script.jsに準拠
   const getHint = () => {
     const target = [1, 2, 3, 4, 5, 6, 7, 8, EMPTY]
     
+    const startKey = state.join(',')
+    const goalKey = target.join(',')
+    
+    if (startKey === goalKey) return
+
+    // マンハッタン距離のヒューリスティック関数
     const manhattan = (s: number[]): number => {
-      let dist = 0
-      for (let i = 0; i < 9; i++) {
-        if (s[i] === EMPTY) continue
-        const targetIdx = target.indexOf(s[i])
-        const currentRow = Math.floor(i / SIZE)
-        const currentCol = i % SIZE
-        const targetRow = Math.floor(targetIdx / SIZE)
-        const targetCol = targetIdx % SIZE
-        dist += Math.abs(currentRow - targetRow) + Math.abs(currentCol - targetCol)
+      let h = 0
+      for (let i = 0; i < s.length; i++) {
+        const v = s[i]
+        if (v === EMPTY) continue
+        const goalIdx = v - 1 // タイルnは位置n-1が正解
+        const r1 = Math.floor(i / size)
+        const c1 = i % size
+        const r2 = Math.floor(goalIdx / size)
+        const c2 = goalIdx % size
+        h += Math.abs(r1 - r2) + Math.abs(c1 - c2)
       }
-      return dist
+      return h
     }
 
     interface Node {
+      key: string
       state: number[]
-      empty: number
-      cost: number
-      heuristic: number
-      path: number[]
+      f: number
+      g: number
     }
 
-    const queue: Node[] = [
-      { state: [...state], empty: emptyPos, cost: 0, heuristic: manhattan(state), path: [] },
-    ]
-    const visited = new Set<string>()
+    interface ParentInfo {
+      prevKey: string | null
+      movedFrom: number | null // 移動元の位置インデックス（0-8）
+    }
 
-    while (queue.length > 0) {
-      queue.sort((a, b) => a.cost + a.heuristic - (b.cost + b.heuristic))
-      const current = queue.shift()!
+    const open: Node[] = []
+    const gScore = new Map<string, number>()
+    const parent = new Map<string, ParentInfo>()
+    const closed = new Set<string>()
 
-      const key = current.state.join(',')
-      if (visited.has(key)) continue
-      visited.add(key)
+    const startH = manhattan(state)
+    open.push({
+      key: startKey,
+      state: [...state],
+      f: startH,
+      g: 0,
+    })
+    gScore.set(startKey, 0)
+    parent.set(startKey, { prevKey: null, movedFrom: null })
 
-      if (current.heuristic === 0) {
-        if (current.path.length > 0) {
-          showHintArrow(current.path[0])
-          return
+    const maxNodes = 100000
+    let explored = 0
+
+    while (open.length > 0 && explored < maxNodes) {
+      // f値が最小のノードを選択
+      let bestIdx = 0
+      for (let i = 1; i < open.length; i++) {
+        if (open[i].f < open[bestIdx].f) bestIdx = i
+      }
+      const current = open.splice(bestIdx, 1)[0]
+      explored++
+
+      if (current.key === goalKey) {
+        // ゴールに到達したので、最初の移動位置インデックスを取得
+        let curKey = current.key
+        let info = parent.get(curKey)!
+        let firstMoveIndex = info.movedFrom
+
+        // スタートの直後の手を見つける
+        while (parent.get(curKey) && parent.get(curKey)!.prevKey !== startKey) {
+          curKey = parent.get(curKey)!.prevKey!
+          info = parent.get(curKey)!
+          firstMoveIndex = info.movedFrom
+        }
+
+        if (firstMoveIndex !== null) {
+          showHintArrowByIndex(firstMoveIndex)
+        }
+        return
+      }
+
+      closed.add(current.key)
+
+      // 隣接する移動可能な位置を展開
+      const emptyIdx = current.state.indexOf(EMPTY)
+      const moveOptions = neighbors[emptyIdx] || [] // 0-indexed
+
+      for (const nextIdx of moveOptions) {
+        const newState = [...current.state]
+        newState[emptyIdx] = current.state[nextIdx]
+        newState[nextIdx] = EMPTY
+
+        const nextKey = newState.join(',')
+        if (closed.has(nextKey)) continue
+
+        const tentativeG = current.g + 1
+        const prevG = gScore.get(nextKey)
+
+        if (prevG === undefined || tentativeG < prevG) {
+          gScore.set(nextKey, tentativeG)
+          parent.set(nextKey, { prevKey: current.key, movedFrom: nextIdx }) // 移動元の位置インデックス
+          const h = manhattan(newState)
+          const f = tentativeG + h
+
+          open.push({
+            key: nextKey,
+            state: newState,
+            f: f,
+            g: tentativeG,
+          })
         }
       }
-
-      for (const nextTile of neighbors[current.empty]) {
-        const tileIdx = current.state.indexOf(nextTile)
-        const emptyIdx = current.state.indexOf(current.empty)
-        const newState = [...current.state]
-        newState[tileIdx] = current.empty
-        newState[emptyIdx] = nextTile
-
-        queue.push({
-          state: newState,
-          empty: nextTile,
-          cost: current.cost + 1,
-          heuristic: manhattan(newState),
-          path: [...current.path, nextTile],
-        })
-      }
     }
+
+    console.warn('A* not found (explored:', explored, ')')
   }
 
-  const showHintArrow = (tileNum: number) => {
-    const tileIdx = state.indexOf(tileNum)
-    const emptyIdx = state.indexOf(emptyPos)
-    const tileRow = Math.floor(tileIdx / SIZE)
-    const tileCol = tileIdx % SIZE
-    const emptyRow = Math.floor(emptyIdx / SIZE)
-    const emptyCol = emptyIdx % SIZE
-
+  const showHintArrowByIndex = (fromIndex: number) => {
+    const emptyIdx = state.indexOf(EMPTY)
+    
+    // 位置の差分から矢印を決定（script.jsと同じロジック）
+    const delta = emptyIdx - fromIndex
     let direction = '→'
-    if (emptyRow < tileRow) direction = '↑'
-    else if (emptyRow > tileRow) direction = '↓'
-    else if (emptyCol < tileCol) direction = '←'
+    if (delta === 1) direction = '→'
+    else if (delta === -1) direction = '←'
+    else if (delta === 3) direction = '↓'
+    else if (delta === -3) direction = '↑'
 
+    const tileNum = state[fromIndex]
+    
+    // 既存のタイマーをクリア
+    if (hintTimeoutRef.current) {
+      clearTimeout(hintTimeoutRef.current)
+    }
+    
     setHintArrow({ pos: tileNum, direction })
     setHints(hints + 1)
-    setTimeout(() => setHintArrow(null), 2000)
+    
+    // 新しいタイマーをセット
+    hintTimeoutRef.current = setTimeout(() => {
+      setHintArrow(null)
+      hintTimeoutRef.current = null
+    }, 3000) // 3秒間表示
   }
 
   const formatTime = (ms: number) => {
@@ -300,11 +504,20 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
     <div className="min-h-screen bg-gray-900 text-white p-4">
       <div className="max-w-6xl mx-auto">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold mb-4">9マスパズル</h1>
+          <h1 className="text-4xl font-bold mb-4">スライドパズル</h1>
           <div className="flex justify-center gap-8 text-lg mb-4">
-            <div>⏱️ {formatTime(elapsedTime)}</div>
-            <div>🚶 {moves} 手</div>
-            <div>💡 {hints} ヒント</div>
+            <div className="flex items-center gap-1">
+              <span className="material-symbols-outlined text-xl">timer</span>
+              {formatTime(elapsedTime)}
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="material-symbols-outlined text-xl">footprints</span>
+              {moves} 手
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="material-symbols-outlined text-xl">lightbulb</span>
+              {hints} ヒント
+            </div>
           </div>
           <div className="flex justify-center gap-4 flex-wrap">
             <button
@@ -322,7 +535,7 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
             </button>
             <button
               onClick={handleRestart}
-              disabled={!isStarted || isWon}
+              disabled={!isStarted}
               className="bg-orange-600 hover:bg-orange-700 px-6 py-2 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               やり直し
@@ -341,11 +554,11 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
           {/* 見本ボード */}
           <div className="flex-shrink-0">
             <h2 className="text-xl font-bold mb-4 text-center">見本</h2>
-            <div className="puzzle-grid mx-auto">
-              {[1, 2, 3, 4, 5, 6, 7, 8, EMPTY].map((tileNum, idx) => (
+            <div className="puzzle-grid puzzle-grid-sample mx-auto" style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}>
+              {Array.from({ length: size * size }, (_, i) => i + 1).map((tileNum, idx) => (
                 <div
                   key={idx}
-                  className={`puzzle-tile ${tileNum === EMPTY ? 'empty' : ''}`}
+                  className={`puzzle-tile puzzle-tile-sample ${tileNum === EMPTY ? 'empty' : ''}`}
                 >
                   {tileNum !== EMPTY && (
                     <>
@@ -363,34 +576,49 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
           {/* ゲームボード */}
           <div className="flex-shrink-0">
             <h2 className="text-xl font-bold mb-4 text-center">プレイ</h2>
-            <div className="puzzle-grid mx-auto">
-              {state.map((tileNum, idx) => (
-                <div
-                  key={idx}
-                  className={`puzzle-tile ${tileNum === EMPTY ? 'empty' : ''} ${
-                    isBlurred && tileNum !== EMPTY ? 'blurred' : ''
-                  }`}
-                  onClick={() => handleTileClickDirect(tileNum)}
-                >
-                  {tileNum !== EMPTY && (
-                    <>
-                      <img src={imagePaths[tileNum - 1]} alt={`Tile ${tileNum}`} />
-                      <div className="absolute top-1 left-1 bg-black bg-opacity-60 text-white text-xs px-1.5 py-0.5 rounded font-bold">
-                        {tileNum}
-                      </div>
-                    </>
-                  )}
-                  {hintArrow && hintArrow.pos === tileNum && (
-                    <div className="hint-arrow">{hintArrow.direction}</div>
-                  )}
-                </div>
-              ))}
+            <div className="puzzle-grid mx-auto" style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}>
+              {state.map((tileNum, idx) => {
+                const row = Math.floor(idx / size) + 1
+                const col = (idx % size) + 1
+                return (
+                  <div
+                    key={tileNum}
+                    className={`puzzle-tile ${tileNum === EMPTY ? 'empty' : ''} ${
+                      isBlurred && tileNum !== EMPTY ? 'blurred' : ''
+                    }`}
+                    style={{
+                      gridArea: `${row} / ${col} / ${row + 1} / ${col + 1}`,
+                    }}
+                    onClick={() => handleTileClickDirect(tileNum)}
+                    draggable={tileNum !== EMPTY && isStarted && !isWon}
+                    onDragStart={(e) => handleDragStart(e, tileNum)}
+                    onDragOver={(e) => handleDragOver(e, tileNum)}
+                    onDrop={(e) => handleDrop(e, tileNum)}
+                    onDragEnd={handleDragEnd}
+                  >
+                    {tileNum !== EMPTY && (
+                      <>
+                        <img src={imagePaths[tileNum - 1]} alt={`Tile ${tileNum}`} />
+                        <div className="absolute top-1 left-1 bg-black bg-opacity-60 text-white text-xs px-1.5 py-0.5 rounded font-bold">
+                          {tileNum}
+                        </div>
+                      </>
+                    )}
+                    {hintArrow && hintArrow.pos === tileNum && (
+                      <div className="hint-arrow">{hintArrow.direction}</div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
 
           {/* リーダーボード */}
           <div className="flex-1 max-w-md">
-            <h2 className="text-2xl font-bold mb-4">🏆 リーダーボード</h2>
+            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+              <span className="material-symbols-outlined text-3xl text-yellow-400">emoji_events</span>
+              リーダーボード
+            </h2>
             {leaderboard.length === 0 ? (
               <p className="text-gray-400">まだ記録がありません</p>
             ) : (
@@ -423,7 +651,10 @@ export default function PuzzleGame({ puzzleId, imagePaths }: PuzzleGameProps) {
       {/* 勝利モーダル */}
       {isWon && (
         <div className="congratulations">
-          <h2 className="text-3xl font-bold mb-4">🎉 おめでとうございます！</h2>
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <span className="material-symbols-outlined text-5xl text-yellow-400">celebration</span>
+            <h2 className="text-3xl font-bold">おめでとうございます！</h2>
+          </div>
           <p className="text-xl mb-2">タイム: {formatTime(elapsedTime)}</p>
           <p className="text-lg mb-2">手数: {moves}</p>
           <p className="text-lg mb-4">ヒント: {hints}</p>

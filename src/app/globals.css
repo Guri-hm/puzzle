@@ -19,6 +19,15 @@ body {
   }
 }
 
+/* Material Icons */
+.material-symbols-outlined {
+  font-variation-settings:
+  'FILL' 0,
+  'wght' 400,
+  'GRAD' 0,
+  'opsz' 24
+}
+
 /* Puzzle Game Styles */
 .puzzle-grid {
   display: grid;
@@ -31,6 +40,7 @@ body {
   background: #222;
   padding: 4px;
   border-radius: 8px;
+  position: relative;
 }
 
 .puzzle-tile {
@@ -38,11 +48,11 @@ body {
   cursor: pointer;
   border-radius: 4px;
   overflow: hidden;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   background: #333;
 }
 
-.puzzle-tile:hover:not(.empty) {
+.puzzle-tile:hover:not(.empty):not(.puzzle-tile-sample) {
   transform: scale(1.05);
   box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
 }
@@ -52,11 +62,22 @@ body {
   cursor: default;
 }
 
+/* 見本タイルのホバー効果を無効化 */
+.puzzle-tile-sample {
+  cursor: default;
+}
+
+.puzzle-tile-sample:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
 .puzzle-tile img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+  transition: filter 0.3s ease;
 }
 
 .puzzle-tile.blurred img {
@@ -67,23 +88,41 @@ body {
   pointer-events: none;
 }
 
-/* Hint Arrow */
+/* Hint Arrow - より見やすく大きく */
 .hint-arrow {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 3rem;
-  color: #ff4444;
-  text-shadow: 0 0 10px rgba(255, 68, 68, 0.8);
+  font-size: 4rem;
+  font-weight: bold;
+  color: #ffeb3b;
+  text-shadow: 
+    0 0 20px rgba(255, 235, 59, 1),
+    0 0 40px rgba(255, 235, 59, 0.8),
+    0 0 60px rgba(255, 235, 59, 0.6),
+    2px 2px 4px rgba(0, 0, 0, 0.8);
   pointer-events: none;
-  z-index: 10;
-  animation: pulse 1s ease-in-out infinite;
+  z-index: 100;
+  animation: hintPulse 1.5s ease-in-out infinite;
+  background: radial-gradient(circle, rgba(255, 235, 59, 0.3) 0%, transparent 70%);
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  50% { opacity: 0.7; transform: translate(-50%, -50%) scale(1.2); }
+@keyframes hintPulse {
+  0%, 100% { 
+    opacity: 1; 
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% { 
+    opacity: 0.85; 
+    transform: translate(-50%, -50%) scale(1.15);
+  }
 }
 
 /* Congratulations Animation */
