@@ -235,7 +235,7 @@ export default function Home() {
       {/* フッター */}
       <div className="border-t border-slate-700/50 mt-16 sm:mt-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 text-center text-slate-500 text-xs sm:text-sm">
-          © 2025 Puzzle Gallery. All rights reserved.
+          © 2025 Puzzle8. All rights reserved.
         </div>
       </div>
     </main>

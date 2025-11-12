@@ -695,7 +695,8 @@ export default function PuzzleGame({ puzzleId, imagePaths, size, isSecret }: Puz
           </div>
         </div>
 
-        <div className="flex flex-col lg:flex-row gap-4 sm:gap-8 items-center lg:items-start justify-center">
+        {/* シークレットモード時はゲームボードを中央配置、それ以外は通常の3列レイアウト */}
+        <div className={`flex flex-col gap-4 sm:gap-8 items-center ${isSecret ? 'lg:flex-col' : 'lg:flex-row lg:items-start justify-center'}`}>
           {/* 見本ボード - デスクトップ表示（シークレットモード時は非表示） */}
           {!isSecret && (
             <div className="hidden lg:block flex-shrink-0">
@@ -720,14 +721,33 @@ export default function PuzzleGame({ puzzleId, imagePaths, size, isSecret }: Puz
           <div className="flex-shrink-0 w-full lg:w-auto max-w-[95vw] lg:max-w-none">
             <h2 className="text-lg sm:text-xl font-bold mb-2 sm:mb-4 text-center">プレイ</h2>
             
-            {/* シークレットモード時、開始前はボード全体に1つの？を表示 */}
+            {/* シークレットモード時、開始前はボード全体を覆う形で？を表示 */}
             {isSecret && !isStarted ? (
               <div 
-                className="puzzle-grid puzzle-grid-play mx-auto"
+                className="puzzle-grid puzzle-grid-play mx-auto relative"
                 style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}
               >
-                <div className="w-full h-full bg-gradient-to-br from-slate-800 via-slate-900 to-slate-800 flex items-center justify-center border-2 border-purple-500/30 rounded-lg"
-                     style={{ gridColumn: `1 / ${size + 1}`, gridRow: `1 / ${size + 1}` }}>
+                {/* 背景として完成画像を配置（透明度0） */}
+                {state.map((tileNum, idx) => {
+                  const row = Math.floor(idx / size) + 1
+                  const col = (idx % size) + 1
+                  return (
+                    <div
+                      key={tileNum}
+                      className="puzzle-tile opacity-0"
+                      style={{
+                        gridArea: `${row} / ${col} / ${row + 1} / ${col + 1}`,
+                      }}
+                    >
+                      <img src={imagePaths[tileNum === EMPTY ? size * size - 1 : tileNum - 1]} alt="" />
+                    </div>
+                  )
+                })}
+                {/* ？アイコンのオーバーレイ（ボード全体を覆う） */}
+                <div 
+                  className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-800 flex items-center justify-center border-2 border-purple-500/30 rounded-lg"
+                  style={{ margin: '0' }}
+                >
                   <div className="text-center">
                     <span className="material-symbols-outlined text-8xl sm:text-9xl text-purple-400 animate-pulse mb-4">help</span>
                     <p className="text-purple-400 text-xl sm:text-2xl font-semibold">シークレットパズル</p>
