@@ -862,7 +862,7 @@ export default function PuzzleGame({ puzzleId, imagePaths, size, isSecret }: Puz
               </div>
             ) : (
               <div 
-                className={`puzzle-grid puzzle-grid-play mx-auto ${!isStarted ? 'not-started' : ''}`} 
+                className={`puzzle-grid puzzle-grid-play mx-auto ${!isStarted ? 'not-started' : ''} ${isWon ? 'completed' : ''}`} 
                 style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}
               >
               {state.map((tileNum, idx) => {

@@ -130,6 +130,22 @@ body {
   border-radius: 0;
 }
 
+/* クリア時も隙間を埋めて1枚の画像に見せる */
+.puzzle-grid-play.completed {
+  gap: 0;
+  padding: 0;
+}
+
+.puzzle-grid-play.completed .puzzle-tile {
+  border-radius: 0;
+  background: transparent;
+}
+
+/* クリア時はタイル番号を非表示 */
+.puzzle-grid-play.completed .puzzle-tile > div {
+  display: none;
+}
+
 .puzzle-tile:hover:not(.empty):not(.puzzle-tile-sample):not(.dragging) {
   transform: scale(1.05);
   box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
@@ -243,17 +259,20 @@ body {
   transform: translate(-50%, -50%);
   background: rgba(0, 0, 0, 0.9);
   color: white;
-  padding: 1.5rem;
+  padding: 2rem;
   border-radius: 16px;
   text-align: center;
   z-index: 10000;
   animation: scaleIn 0.3s ease-out;
-  max-width: 90vw;
+  max-width: 500px;
+  width: 90vw;
 }
 
 @media (min-width: 640px) {
   .congratulations {
-    padding: 2rem;
+    padding: 2.5rem;
+    width: auto;
+    min-width: 400px;
   }
 }
 
