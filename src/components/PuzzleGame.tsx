@@ -94,34 +94,32 @@ export default function PuzzleGame({ puzzleId, imagePaths, size }: PuzzleGamePro
   const [initialState, setInitialState] = useState<number[]>(() => 
     Array.from({ length: size * size }, (_, i) => i + 1)
   )
-  const [emptyPos, setEmptyPos] = useState(() => EMPTY)
+  const [emptyPos, setEmptyPos] = useState(() => size * size - 1) // 完成状態では最後の位置
   const [moves, setMoves] = useState(0)
   const [hints, setHints] = useState(0)
   const [startTime, setStartTime] = useState<number | null>(null)
   const [elapsedTime, setElapsedTime] = useState(0)
-  const [isBlurred, setIsBlurred] = useState(true)
   const [isStarted, setIsStarted] = useState(false)
+  const [hasStartedOnce, setHasStartedOnce] = useState(false) // 一度でも開始したか
   const [hintArrow, setHintArrow] = useState<{ pos: number; direction: string } | null>(null)
   const [isWon, setIsWon] = useState(false)
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
   const [draggedTile, setDraggedTile] = useState<number | null>(null)
   const [animatingTiles, setAnimatingTiles] = useState<Set<number>>(new Set())
+  const [showSample, setShowSample] = useState(false) // 見本ボードの表示状態（モバイル用）
+  const [draggingTile, setDraggingTile] = useState<{ tileNum: number; x: number; y: number } | null>(null) // ドラッグ中のタイル位置
+  const [touchStart, setTouchStart] = useState<{ x: number; y: number; tileNum: number; direction: 'horizontal' | 'vertical' | null } | null>(null) // タッチ開始位置と許可方向
   const hintTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // クライアントサイドでのみ初期シャッフルを実行（hydration対策）
-  useEffect(() => {
-    const initialShuffle = generateInitialState()
-    setState(initialShuffle.state)
-    setInitialState(initialShuffle.state)
-    setEmptyPos(initialShuffle.emptyPos)
-  }, [generateInitialState])
+  // 初期状態は完成画像のまま（シャッフルしない）
+  // シャッフルは「シャッフルして開始」ボタンを押した時のみ実行
 
-  // タイマー更新
+  // タイマー更新（表示用のみ、1秒ごと）
   useEffect(() => {
     if (!startTime || isWon || !isStarted) return
     const timer = setInterval(() => {
       setElapsedTime(Date.now() - startTime)
-    }, 100)
+    }, 1000)
     return () => clearInterval(timer)
   }, [startTime, isWon, isStarted])
 
@@ -136,10 +134,14 @@ export default function PuzzleGame({ puzzleId, imagePaths, size }: PuzzleGamePro
   // 勝利判定
   useEffect(() => {
     const isWinning = state.every((val, idx) => val === idx + 1)
-    if (isWinning && moves > 0 && !isWon) {
+    if (isWinning && moves > 0 && !isWon && startTime) {
+      // 勝利時の正確な時間を計算
+      const finalTime = Date.now() - startTime
+      setElapsedTime(finalTime)
       setIsWon(true)
+      
       const entry: LeaderboardEntry = {
-        time: elapsedTime,
+        time: finalTime,
         moves,
         hints,
         date: new Date().toISOString(),
@@ -151,7 +153,7 @@ export default function PuzzleGame({ puzzleId, imagePaths, size }: PuzzleGamePro
       localStorage.setItem(`puzzle-${puzzleId}-leaderboard`, JSON.stringify(newLeaderboard))
       showCongratulations()
     }
-  }, [state, moves, isWon, elapsedTime, hints, leaderboard, puzzleId])
+  }, [state, moves, isWon, startTime, hints, leaderboard, puzzleId])
 
   const showCongratulations = () => {
     // 紙吹雪アニメーション
@@ -212,27 +214,20 @@ export default function PuzzleGame({ puzzleId, imagePaths, size }: PuzzleGamePro
     setEmptyPos(emptyIdx)
   }
 
-  // シャッフルボタン
+  // シャッフルボタン（開始も兼ねる）
   const shuffle = useCallback(() => {
     performShuffle()
     setMoves(0)
     setHints(0)
-    setStartTime(null)
+    setStartTime(Date.now())
     setElapsedTime(0)
-    setIsBlurred(true)
-    setIsStarted(false)
+    setIsStarted(true)
+    setHasStartedOnce(true) // 一度でも開始したフラグを立てる
     setHintArrow(null)
     setIsWon(false)
   }, [])
 
-  // 開始ボタン
-  const handleStart = () => {
-    setIsBlurred(false)
-    setIsStarted(true)
-    setStartTime(Date.now())
-  }
-
-  // やり直しボタン（配置のみ初期状態に戻す。タイマー・手数・ヒントは継続）
+  // 位置リセットボタン（配置のみ初期状態に戻す。タイマー・手数・ヒントは継続）
   const handleRestart = () => {
     setState([...initialState])
     setEmptyPos(initialState.indexOf(EMPTY))
@@ -350,6 +345,135 @@ export default function PuzzleGame({ puzzleId, imagePaths, size }: PuzzleGamePro
   // ドラッグ終了
   const handleDragEnd = () => {
     setDraggedTile(null)
+    setDraggingTile(null)
+  }
+
+  // タッチ開始
+  const handleTouchStart = (e: React.TouchEvent, tileNum: number) => {
+    if (isWon || tileNum === EMPTY || !isStarted || animatingTiles.size > 0) return
+    
+    const touch = e.touches[0]
+    
+    // タイルと空マスの位置関係を確認して、移動可能な方向を判定
+    const tileIdx = state.indexOf(tileNum)
+    const emptyIdx = state.indexOf(EMPTY)
+    
+    const tileRow = Math.floor(tileIdx / size)
+    const tileCol = tileIdx % size
+    const emptyRow = Math.floor(emptyIdx / size)
+    const emptyCol = emptyIdx % size
+    
+    let allowedDirection: 'horizontal' | 'vertical' | null = null
+    
+    // 横方向に隣接している場合
+    if (tileRow === emptyRow && Math.abs(tileCol - emptyCol) === 1) {
+      allowedDirection = 'horizontal'
+    }
+    // 縦方向に隣接している場合
+    else if (tileCol === emptyCol && Math.abs(tileRow - emptyRow) === 1) {
+      allowedDirection = 'vertical'
+    }
+    
+    setTouchStart({ x: touch.clientX, y: touch.clientY, tileNum, direction: allowedDirection })
+    
+    // 画面のスクロールを防止
+    e.preventDefault()
+  }
+
+  // タッチ移動
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStart) return
+    
+    const touch = e.touches[0]
+    const deltaX = touch.clientX - touchStart.x
+    const deltaY = touch.clientY - touchStart.y
+    
+    // 移動可能な方向のみに制限
+    let constrainedX = 0
+    let constrainedY = 0
+    
+    if (touchStart.direction === 'horizontal') {
+      // 横方向のみ許可
+      constrainedX = deltaX
+      constrainedY = 0
+    } else if (touchStart.direction === 'vertical') {
+      // 縦方向のみ許可
+      constrainedX = 0
+      constrainedY = deltaY
+    } else {
+      // 移動不可の場合は何もしない
+      return
+    }
+    
+    // ドラッグ中の視覚的フィードバック（制限された方向のみ）
+    if (Math.abs(constrainedX) > 5 || Math.abs(constrainedY) > 5) {
+      setDraggingTile({
+        tileNum: touchStart.tileNum,
+        x: constrainedX,
+        y: constrainedY
+      })
+    }
+    
+    // 画面のスクロールを防止
+    e.preventDefault()
+  }
+
+  // タッチ終了
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStart) return
+    
+    const touch = e.changedTouches[0]
+    const deltaX = touch.clientX - touchStart.x
+    const deltaY = touch.clientY - touchStart.y
+    
+    // スワイプ方向を判定
+    const threshold = 30 // 最小スワイプ距離
+    const tileNum = touchStart.tileNum
+    const tileIdx = state.indexOf(tileNum)
+    const emptyIdx = state.indexOf(EMPTY)
+    
+    const tileRow = Math.floor(tileIdx / size)
+    const tileCol = tileIdx % size
+    const emptyRow = Math.floor(emptyIdx / size)
+    const emptyCol = emptyIdx % size
+    
+    let canMove = false
+    
+    if (Math.abs(deltaX) > Math.abs(deltaY)) {
+      // 横方向のスワイプ
+      if (Math.abs(deltaX) > threshold) {
+        if (deltaX > 0) {
+          // 右スワイプ: 右に空マスがあるか
+          canMove = emptyRow === tileRow && emptyCol === tileCol + 1
+        } else {
+          // 左スワイプ: 左に空マスがあるか
+          canMove = emptyRow === tileRow && emptyCol === tileCol - 1
+        }
+      }
+    } else {
+      // 縦方向のスワイプ
+      if (Math.abs(deltaY) > threshold) {
+        if (deltaY > 0) {
+          // 下スワイプ: 下に空マスがあるか
+          canMove = emptyCol === tileCol && emptyRow === tileRow + 1
+        } else {
+          // 上スワイプ: 上に空マスがあるか
+          canMove = emptyCol === tileCol && emptyRow === tileRow - 1
+        }
+      }
+    }
+    
+    if (canMove) {
+      if (hintTimeoutRef.current) {
+        clearTimeout(hintTimeoutRef.current)
+        hintTimeoutRef.current = null
+      }
+      setHintArrow(null)
+      moveTile(tileNum)
+    }
+    
+    setTouchStart(null)
+    setDraggingTile(null)
   }
 
   // ヒント計算（A*アルゴリズム）- script.jsに準拠
@@ -503,98 +627,112 @@ export default function PuzzleGame({ puzzleId, imagePaths, size }: PuzzleGamePro
     const seconds = Math.floor(ms / 1000)
     const minutes = Math.floor(seconds / 60)
     const secs = seconds % 60
-    const millis = Math.floor((ms % 1000) / 10)
-    return `${minutes}:${secs.toString().padStart(2, '0')}.${millis.toString().padStart(2, '0')}`
+    return `${minutes}:${secs.toString().padStart(2, '0')}`
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4">
-      <div className="max-w-6xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold mb-4">スライドパズル</h1>
-          <div className="flex justify-center gap-8 text-lg mb-4">
+    <div className="min-h-screen bg-gray-900 text-white p-2 sm:p-4">
+      <div className="max-w-7xl mx-auto">
+        {/* 一覧に戻るボタン */}
+        <div className="mb-4">
+          <a
+            href="/"
+            className="inline-flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition text-sm sm:text-base"
+          >
+            <span className="material-symbols-outlined text-lg sm:text-xl">arrow_back</span>
+            <span className="hidden sm:inline">パズル一覧に戻る</span>
+            <span className="sm:hidden">一覧</span>
+          </a>
+        </div>
+
+        <div className="text-center mb-4 sm:mb-8">
+          <h1 className="text-2xl sm:text-4xl font-bold mb-2 sm:mb-4">8パズル</h1>
+          <div className="flex justify-center gap-3 sm:gap-8 text-sm sm:text-lg mb-2 sm:mb-4 flex-wrap">
             <div className="flex items-center gap-1">
-              <span className="material-symbols-outlined text-xl">timer</span>
+              <span className="material-symbols-outlined text-base sm:text-xl">timer</span>
               {formatTime(elapsedTime)}
             </div>
             <div className="flex items-center gap-1">
-              <span className="material-symbols-outlined text-xl">pan_tool_alt</span>
+              <span className="material-symbols-outlined text-base sm:text-xl">pan_tool_alt</span>
               {moves} 手
             </div>
             <div className="flex items-center gap-1">
-              <span className="material-symbols-outlined text-xl">lightbulb</span>
+              <span className="material-symbols-outlined text-base sm:text-xl">lightbulb</span>
               {hints} ヒント
             </div>
           </div>
-          <div className="flex justify-center gap-4 flex-wrap">
+          <div className="flex justify-center gap-2 sm:gap-4 flex-wrap px-2">
             <button
               onClick={shuffle}
-              className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-bold transition"
+              className="bg-blue-600 hover:bg-blue-700 px-4 py-2 sm:px-6 sm:py-2 rounded-lg font-bold transition text-sm sm:text-base"
             >
-              シャッフル
-            </button>
-            <button
-              onClick={handleStart}
-              disabled={isStarted}
-              className="bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              開始
+              {hasStartedOnce ? 'シャッフル' : 'シャッフルして開始'}
             </button>
             <button
               onClick={handleRestart}
               disabled={!isStarted}
-              className="bg-orange-600 hover:bg-orange-700 px-6 py-2 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-orange-600 hover:bg-orange-700 px-4 py-2 sm:px-6 sm:py-2 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
             >
-              やり直し
+              位置リセット
             </button>
             <button
               onClick={getHint}
               disabled={isWon || !isStarted}
-              className="bg-green-600 hover:bg-green-700 px-6 py-2 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-green-600 hover:bg-green-700 px-4 py-2 sm:px-6 sm:py-2 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
             >
               ヒント
+            </button>
+            {/* モバイル用：見本表示ボタン */}
+            <button
+              onClick={() => setShowSample(true)}
+              className="lg:hidden bg-purple-600 hover:bg-purple-700 px-4 py-2 sm:px-6 sm:py-2 rounded-lg font-bold transition text-sm sm:text-base"
+            >
+              見本を表示
             </button>
           </div>
         </div>
 
-        <div className="flex flex-col lg:flex-row gap-8 items-start justify-center">
-          {/* 見本ボード */}
-          <div className="flex-shrink-0">
+        <div className="flex flex-col lg:flex-row gap-4 sm:gap-8 items-center lg:items-start justify-center">
+          {/* 見本ボード - デスクトップ表示 */}
+          <div className="hidden lg:block flex-shrink-0">
             <h2 className="text-xl font-bold mb-4 text-center">見本</h2>
             <div className="puzzle-grid puzzle-grid-sample mx-auto" style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}>
               {Array.from({ length: size * size }, (_, i) => i + 1).map((tileNum, idx) => (
                 <div
                   key={idx}
-                  className={`puzzle-tile puzzle-tile-sample ${tileNum === EMPTY ? 'empty' : ''}`}
+                  className="puzzle-tile puzzle-tile-sample"
                 >
-                  {tileNum !== EMPTY && (
-                    <>
-                      <img src={imagePaths[tileNum - 1]} alt={`Tile ${tileNum}`} />
-                      <div className="absolute top-1 left-1 bg-black bg-opacity-60 text-white text-xs px-1.5 py-0.5 rounded font-bold">
-                        {tileNum}
-                      </div>
-                    </>
-                  )}
+                  <img src={imagePaths[tileNum - 1]} alt={`Tile ${tileNum}`} />
+                  <div className="absolute top-1 left-1 bg-black bg-opacity-60 text-white text-xs px-1.5 py-0.5 rounded font-bold">
+                    {tileNum}
+                  </div>
                 </div>
               ))}
             </div>
           </div>
 
           {/* ゲームボード */}
-          <div className="flex-shrink-0">
-            <h2 className="text-xl font-bold mb-4 text-center">プレイ</h2>
-            <div className="puzzle-grid mx-auto" style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}>
+          <div className="flex-shrink-0 w-full lg:w-auto max-w-[95vw] lg:max-w-none">
+            <h2 className="text-lg sm:text-xl font-bold mb-2 sm:mb-4 text-center">プレイ</h2>
+            <div 
+              className={`puzzle-grid puzzle-grid-play mx-auto ${!isStarted ? 'not-started' : ''}`} 
+              style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}
+            >
               {state.map((tileNum, idx) => {
                 const row = Math.floor(idx / size) + 1
                 const col = (idx % size) + 1
+                const isDragging = draggingTile?.tileNum === tileNum
+                
                 return (
                   <div
                     key={tileNum}
-                    className={`puzzle-tile ${tileNum === EMPTY ? 'empty' : ''} ${
-                      isBlurred && tileNum !== EMPTY ? 'blurred' : ''
-                    }`}
+                    className={`puzzle-tile ${tileNum === EMPTY && isStarted ? 'empty' : ''} ${
+                      !isStarted && tileNum !== EMPTY ? 'puzzle-tile-complete' : ''
+                    } ${isDragging ? 'dragging' : ''}`}
                     style={{
                       gridArea: `${row} / ${col} / ${row + 1} / ${col + 1}`,
+                      transform: isDragging ? `translate(${draggingTile.x}px, ${draggingTile.y}px)` : undefined,
+                      zIndex: isDragging ? 1000 : undefined,
                     }}
                     onClick={() => handleTileClickDirect(tileNum)}
                     draggable={tileNum !== EMPTY && isStarted && !isWon}
@@ -602,13 +740,18 @@ export default function PuzzleGame({ puzzleId, imagePaths, size }: PuzzleGamePro
                     onDragOver={(e) => handleDragOver(e, tileNum)}
                     onDrop={(e) => handleDrop(e, tileNum)}
                     onDragEnd={handleDragEnd}
+                    onTouchStart={(e) => handleTouchStart(e, tileNum)}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
                   >
-                    {tileNum !== EMPTY && (
+                    {(tileNum !== EMPTY || !isStarted) && (
                       <>
-                        <img src={imagePaths[tileNum - 1]} alt={`Tile ${tileNum}`} />
-                        <div className="absolute top-1 left-1 bg-black bg-opacity-60 text-white text-xs px-1.5 py-0.5 rounded font-bold">
-                          {tileNum}
-                        </div>
+                        <img src={imagePaths[tileNum === EMPTY ? size * size - 1 : tileNum - 1]} alt={`Tile ${tileNum}`} />
+                        {isStarted && tileNum !== EMPTY && (
+                          <div className="absolute top-0.5 left-0.5 sm:top-1 sm:left-1 bg-black bg-opacity-60 text-white text-[10px] sm:text-xs px-1 sm:px-1.5 py-0.5 rounded font-bold">
+                            {tileNum}
+                          </div>
+                        )}
                       </>
                     )}
                     {hintArrow && hintArrow.pos === tileNum && (
@@ -621,30 +764,30 @@ export default function PuzzleGame({ puzzleId, imagePaths, size }: PuzzleGamePro
           </div>
 
           {/* リーダーボード */}
-          <div className="flex-1 max-w-md">
-            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-              <span className="material-symbols-outlined text-3xl text-yellow-400">emoji_events</span>
+          <div className="w-full lg:flex-shrink-0 lg:w-80 px-2 sm:px-0">
+            <h2 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-4 flex items-center justify-center lg:justify-start gap-2">
+              <span className="material-symbols-outlined text-2xl sm:text-3xl text-yellow-400">emoji_events</span>
               リーダーボード
             </h2>
             {leaderboard.length === 0 ? (
-              <p className="text-gray-400">まだ記録がありません</p>
+              <p className="text-gray-400 text-center lg:text-left text-sm sm:text-base">まだ記録がありません</p>
             ) : (
               <div className="space-y-2">
                 {leaderboard.map((entry, idx) => (
                   <div
                     key={idx}
-                    className="bg-gray-800 p-3 rounded-lg flex justify-between items-center"
+                    className="bg-gray-800 p-2 sm:p-3 rounded-lg flex justify-between items-center"
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl font-bold text-yellow-400">#{idx + 1}</span>
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      <span className="text-lg sm:text-2xl font-bold text-yellow-400">#{idx + 1}</span>
                       <div>
-                        <div className="font-bold">{formatTime(entry.time)}</div>
-                        <div className="text-sm text-gray-400">
+                        <div className="font-bold text-sm sm:text-base">{formatTime(entry.time)}</div>
+                        <div className="text-xs sm:text-sm text-gray-400">
                           {entry.moves}手 / {entry.hints}ヒント
                         </div>
                       </div>
                     </div>
-                    <div className="text-xs text-gray-500">
+                    <div className="text-[10px] sm:text-xs text-gray-500">
                       {new Date(entry.date).toLocaleDateString('ja-JP')}
                     </div>
                   </div>
@@ -655,19 +798,55 @@ export default function PuzzleGame({ puzzleId, imagePaths, size }: PuzzleGamePro
         </div>
       </div>
 
+      {/* モバイル用：見本ボードのオーバーレイ */}
+      {showSample && (
+        <div 
+          className="lg:hidden fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowSample(false)}
+        >
+          <div 
+            className="bg-gray-800 rounded-2xl p-4 sm:p-6 max-w-md w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">見本</h2>
+              <button
+                onClick={() => setShowSample(false)}
+                className="text-gray-400 hover:text-white transition"
+              >
+                <span className="material-symbols-outlined text-3xl">close</span>
+              </button>
+            </div>
+            <div className="puzzle-grid puzzle-grid-sample-mobile mx-auto" style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}>
+              {Array.from({ length: size * size }, (_, i) => i + 1).map((tileNum, idx) => (
+                <div
+                  key={idx}
+                  className="puzzle-tile puzzle-tile-sample"
+                >
+                  <img src={imagePaths[tileNum - 1]} alt={`Tile ${tileNum}`} />
+                  <div className="absolute top-1 left-1 bg-black bg-opacity-60 text-white text-xs px-1.5 py-0.5 rounded font-bold">
+                    {tileNum}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 勝利モーダル */}
       {isWon && (
         <div className="congratulations">
           <div className="flex items-center justify-center gap-3 mb-4">
-            <span className="material-symbols-outlined text-5xl text-yellow-400">celebration</span>
-            <h2 className="text-3xl font-bold">おめでとうございます！</h2>
+            <span className="material-symbols-outlined text-4xl sm:text-5xl text-yellow-400">celebration</span>
+            <h2 className="text-2xl sm:text-3xl font-bold">おめでとうございます！</h2>
           </div>
-          <p className="text-xl mb-2">タイム: {formatTime(elapsedTime)}</p>
-          <p className="text-lg mb-2">手数: {moves}</p>
-          <p className="text-lg mb-4">ヒント: {hints}</p>
+          <p className="text-lg sm:text-xl mb-2">タイム: {formatTime(elapsedTime)}</p>
+          <p className="text-base sm:text-lg mb-2">手数: {moves}</p>
+          <p className="text-base sm:text-lg mb-4">ヒント: {hints}</p>
           <button
             onClick={shuffle}
-            className="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-lg font-bold transition"
+            className="bg-blue-600 hover:bg-blue-700 px-6 py-2 sm:px-8 sm:py-3 rounded-lg font-bold transition text-sm sm:text-base"
           >
             もう一度プレイ
           </button>

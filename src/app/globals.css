@@ -17,6 +17,13 @@ body {
   .text-balance {
     text-wrap: balance;
   }
+  
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 }
 
 /* Material Icons */
@@ -29,18 +36,64 @@ body {
 }
 
 /* Puzzle Game Styles */
-.puzzle-grid {
+/* 見本ボード - 小さめ */
+.puzzle-grid-sample {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 2px;
+  width: 100%;
+  max-width: 250px;
+  aspect-ratio: 1;
+  background: #222;
+  padding: 2px;
+  border-radius: 8px;
+  position: relative;
+}
+
+/* モバイル用見本ボード */
+.puzzle-grid-sample-mobile {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 2px;
+  width: 100%;
+  max-width: 350px;
+  aspect-ratio: 1;
+  background: #222;
+  padding: 2px;
+  border-radius: 8px;
+  position: relative;
+}
+
+/* プレイボード - レスポンシブ */
+.puzzle-grid-play {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
   gap: 4px;
   width: 100%;
-  max-width: 400px;
+  max-width: 500px;
   aspect-ratio: 1;
   background: #222;
   padding: 4px;
   border-radius: 8px;
   position: relative;
+  touch-action: none; /* タッチ操作時のスクロールを防止 */
+}
+
+@media (max-width: 1023px) {
+  .puzzle-grid-play {
+    max-width: min(500px, 95vw);
+  }
+}
+
+@media (max-width: 640px) {
+  .puzzle-grid-play {
+    gap: 2px;
+    padding: 2px;
+    max-width: min(400px, 95vw);
+  }
 }
 
 .puzzle-tile {
@@ -50,9 +103,34 @@ body {
   overflow: hidden;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   background: #333;
+  touch-action: none; /* タッチ操作時のデフォルト動作を無効化 */
 }
 
-.puzzle-tile:hover:not(.empty):not(.puzzle-tile-sample) {
+/* ドラッグ中のタイル */
+.puzzle-tile.dragging {
+  transition: none; /* ドラッグ中はトランジションを無効化 */
+  opacity: 0.8;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  transform-origin: center;
+  cursor: grabbing;
+}
+
+/* 開始前は隙間なく表示（完成画像として） */
+.puzzle-tile-complete {
+  background: transparent;
+  border-radius: 0;
+}
+
+.puzzle-grid-play.not-started {
+  gap: 0;
+  padding: 0;
+}
+
+.puzzle-grid-play.not-started .puzzle-tile {
+  border-radius: 0;
+}
+
+.puzzle-tile:hover:not(.empty):not(.puzzle-tile-sample):not(.dragging) {
   transform: scale(1.05);
   box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
 }
@@ -60,6 +138,15 @@ body {
 .puzzle-tile.empty {
   background: #111;
   cursor: default;
+}
+
+/* タイル移動可能時のカーソル */
+.puzzle-tile:not(.empty):not(.puzzle-tile-sample) {
+  cursor: grab;
+}
+
+.puzzle-tile:not(.empty):not(.puzzle-tile-sample):active {
+  cursor: grabbing;
 }
 
 /* 見本タイルのホバー効果を無効化 */
@@ -88,13 +175,13 @@ body {
   pointer-events: none;
 }
 
-/* Hint Arrow - より見やすく大きく */
+/* Hint Arrow - より見やすく大きく（レスポンシブ対応） */
 .hint-arrow {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 4rem;
+  font-size: 3rem;
   font-weight: bold;
   color: #ffeb3b;
   text-shadow: 
@@ -106,12 +193,20 @@ body {
   z-index: 100;
   animation: hintPulse 1.5s ease-in-out infinite;
   background: radial-gradient(circle, rgba(255, 235, 59, 0.3) 0%, transparent 70%);
-  width: 80px;
-  height: 80px;
+  width: 60px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
+}
+
+@media (min-width: 640px) {
+  .hint-arrow {
+    font-size: 4rem;
+    width: 80px;
+    height: 80px;
+  }
 }
 
 @keyframes hintPulse {
@@ -148,11 +243,18 @@ body {
   transform: translate(-50%, -50%);
   background: rgba(0, 0, 0, 0.9);
   color: white;
-  padding: 2rem;
+  padding: 1.5rem;
   border-radius: 16px;
   text-align: center;
   z-index: 10000;
   animation: scaleIn 0.3s ease-out;
+  max-width: 90vw;
+}
+
+@media (min-width: 640px) {
+  .congratulations {
+    padding: 2rem;
+  }
 }
 
 @keyframes scaleIn {
