@@ -281,6 +281,22 @@ body {
   to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
 }
 
+/* スコア表示アニメーション */
+.congratulations .animate-pulse {
+  animation: scorePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes scorePulse {
+  0%, 100% { 
+    transform: scale(1);
+    filter: drop-shadow(0 0 10px rgba(234, 179, 8, 0.5));
+  }
+  50% { 
+    transform: scale(1.05);
+    filter: drop-shadow(0 0 20px rgba(234, 179, 8, 0.8));
+  }
+}
+
 /* Shuffle Animation - タイルが直線的に移動しながら軽く浮かび上がる演出 */
 @keyframes shuffle-fly {
   0% {

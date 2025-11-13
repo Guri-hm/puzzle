@@ -14,6 +14,18 @@ interface LeaderboardEntry {
   moves: number
   hints: number
   date: string
+  score?: number // スコアを追加
+}
+
+interface ScoreBreakdown {
+  totalScore: number
+  moveScore: number
+  timeScore: number
+  hintPenalty: number
+  minMoves: number
+  actualMoves: number
+  timeLimit: number
+  actualTime: number
 }
 
 // 隣接マップを動的に生成
@@ -112,6 +124,9 @@ export default function PuzzleGame({ puzzleId, imagePaths, size, isSecret }: Puz
   const [touchStart, setTouchStart] = useState<{ x: number; y: number; tileNum: number; direction: 'horizontal' | 'vertical' | null } | null>(null) // タッチ開始位置と許可方向
   const [isShuffling, setIsShuffling] = useState(false) // シャッフル中フラグ
   const [shuffleAnimations, setShuffleAnimations] = useState<Map<number, { fromRow: number; fromCol: number; toRow: number; toCol: number }>>(new Map()) // シャッフルアニメーション情報
+  const [scoreBreakdown, setScoreBreakdown] = useState<ScoreBreakdown | null>(null) // スコア詳細
+  const [isCalculatingScore, setIsCalculatingScore] = useState(false) // スコア計算中フラグ
+  const [displayScore, setDisplayScore] = useState(0) // 表示用スコア（アニメーション用）
   const hintTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // 初期状態は完成画像のまま（シャッフルしない）
@@ -134,7 +149,7 @@ export default function PuzzleGame({ puzzleId, imagePaths, size, isSecret }: Puz
     }
   }, [puzzleId])
 
-  // 勝利判定
+  // 勝利判定とスコア計算
   useEffect(() => {
     const isWinning = state.every((val, idx) => val === idx + 1)
     if (isWinning && moves > 0 && !isWon && startTime) {
@@ -142,21 +157,53 @@ export default function PuzzleGame({ puzzleId, imagePaths, size, isSecret }: Puz
       const finalTime = Date.now() - startTime
       setElapsedTime(finalTime)
       setIsWon(true)
+      setIsCalculatingScore(true)
+      setDisplayScore(0)
       
-      const entry: LeaderboardEntry = {
-        time: finalTime,
-        moves,
-        hints,
-        date: new Date().toISOString(),
-      }
-      const newLeaderboard = [...leaderboard, entry]
-        .sort((a, b) => a.time - b.time)
-        .slice(0, 10)
-      setLeaderboard(newLeaderboard)
-      localStorage.setItem(`puzzle-${puzzleId}-leaderboard`, JSON.stringify(newLeaderboard))
       showCongratulations()
+      
+      // スコア計算を非同期で実行（アニメーション演出中に計算）
+      setTimeout(async () => {
+        // 最小手数を計算（時間がかかる処理）
+        const minMoves = calculateMinMoves(initialState)
+        
+        // スコアを計算
+        const breakdown = calculateScore(minMoves, moves, finalTime, hints)
+        setScoreBreakdown(breakdown)
+        
+        // スコアのカウントアップアニメーション
+        const duration = 1500 // 1.5秒かけてカウントアップ
+        const steps = 60
+        const increment = breakdown.totalScore / steps
+        let currentScore = 0
+        
+        const interval = setInterval(() => {
+          currentScore += increment
+          if (currentScore >= breakdown.totalScore) {
+            setDisplayScore(breakdown.totalScore)
+            setIsCalculatingScore(false)
+            clearInterval(interval)
+          } else {
+            setDisplayScore(Math.floor(currentScore))
+          }
+        }, duration / steps)
+        
+        // リーダーボードに追加
+        const entry: LeaderboardEntry = {
+          time: finalTime,
+          moves,
+          hints,
+          date: new Date().toISOString(),
+          score: breakdown.totalScore
+        }
+        const newLeaderboard = [...leaderboard, entry]
+          .sort((a, b) => (b.score ?? 0) - (a.score ?? 0)) // スコア順にソート
+          .slice(0, 10)
+        setLeaderboard(newLeaderboard)
+        localStorage.setItem(`puzzle-${puzzleId}-leaderboard`, JSON.stringify(newLeaderboard))
+      }, 500) // 紙吹雪演出開始後0.5秒後に計算開始
     }
-  }, [state, moves, isWon, startTime, hints, leaderboard, puzzleId])
+  }, [state, moves, isWon, startTime, hints, leaderboard, puzzleId, initialState, size])
 
   const showCongratulations = () => {
     // 紙吹雪アニメーション
@@ -727,6 +774,143 @@ export default function PuzzleGame({ puzzleId, imagePaths, size, isSecret }: Puz
     return `${minutes}:${secs.toString().padStart(2, '0')}`
   }
 
+  // パズルサイズごとの時間制限（ミリ秒）
+  const getTimeLimit = (size: number): number => {
+    if (size === 3) return 2 * 60 * 1000 // 2分
+    if (size === 4) return 3 * 60 * 1000 // 3分
+    if (size === 5) return 5 * 60 * 1000 // 5分
+    return 10 * 60 * 1000 // 6×6以上は10分
+  }
+
+  // 最小手数を計算（A*アルゴリズム）
+  const calculateMinMoves = (startState: number[]): number => {
+    const target = Array.from({ length: size * size }, (_, i) => i + 1)
+    
+    const startKey = startState.join(',')
+    const goalKey = target.join(',')
+    
+    if (startKey === goalKey) return 0
+
+    // マンハッタン距離のヒューリスティック関数
+    const manhattan = (s: number[]): number => {
+      let dist = 0
+      for (let i = 0; i < s.length; i++) {
+        const val = s[i]
+        if (val === EMPTY) continue
+        const targetIdx = val - 1
+        const currentRow = Math.floor(i / size)
+        const currentCol = i % size
+        const targetRow = Math.floor(targetIdx / size)
+        const targetCol = targetIdx % size
+        dist += Math.abs(currentRow - targetRow) + Math.abs(currentCol - targetCol)
+      }
+      return dist
+    }
+
+    interface Node {
+      key: string
+      state: number[]
+      f: number
+      g: number
+    }
+
+    const open: Node[] = []
+    const gScore = new Map<string, number>()
+    const closed = new Set<string>()
+
+    const startH = manhattan(startState)
+    open.push({
+      key: startKey,
+      state: [...startState],
+      f: startH,
+      g: 0,
+    })
+    gScore.set(startKey, 0)
+
+    const maxNodes = 100000
+    let explored = 0
+
+    while (open.length > 0 && explored < maxNodes) {
+      // f値が最小のノードを選択
+      let bestIdx = 0
+      for (let i = 1; i < open.length; i++) {
+        if (open[i].f < open[bestIdx].f) bestIdx = i
+      }
+      const current = open.splice(bestIdx, 1)[0]
+      explored++
+
+      if (current.key === goalKey) {
+        return current.g // 最小手数を返す
+      }
+
+      closed.add(current.key)
+
+      // 隣接する移動可能な位置を展開
+      const emptyIdx = current.state.indexOf(EMPTY)
+      const moveOptions = neighbors[emptyIdx] || []
+
+      for (const nextIdx of moveOptions) {
+        const newState = [...current.state]
+        newState[emptyIdx] = newState[nextIdx]
+        newState[nextIdx] = EMPTY
+        const newKey = newState.join(',')
+
+        if (closed.has(newKey)) continue
+
+        const newG = current.g + 1
+        const existingG = gScore.get(newKey)
+
+        if (existingG === undefined || newG < existingG) {
+          const newH = manhattan(newState)
+          gScore.set(newKey, newG)
+          
+          const existingIdx = open.findIndex(n => n.key === newKey)
+          if (existingIdx >= 0) {
+            open[existingIdx] = { key: newKey, state: newState, f: newG + newH, g: newG }
+          } else {
+            open.push({ key: newKey, state: newState, f: newG + newH, g: newG })
+          }
+        }
+      }
+    }
+
+    console.warn('最小手数計算: 解が見つかりませんでした')
+    return moves // フォールバック：実際の手数を返す
+  }
+
+  // スコアを計算
+  const calculateScore = (minMoves: number, actualMoves: number, actualTime: number, hintsUsed: number): ScoreBreakdown => {
+    const timeLimit = getTimeLimit(size)
+    
+    // 手数スコア（60点満点）
+    // 最小手数なら60点、超過分は1手につき1点減点（最低0点）
+    const moveExcess = Math.max(0, actualMoves - minMoves)
+    const moveScore = Math.max(0, 60 - moveExcess)
+    
+    // 時間スコア（30点満点）
+    // 制限時間内なら30点、超過は10秒ごとに1点減点（最低0点）
+    const timeExcess = Math.max(0, actualTime - timeLimit)
+    const timeDeduction = Math.floor(timeExcess / 10000) // 10秒単位
+    const timeScore = Math.max(0, 30 - timeDeduction)
+    
+    // ヒントペナルティ（1回につき2点減点）
+    const hintPenalty = hintsUsed * 2
+    
+    // 合計スコア（最低0点、最高100点）
+    const totalScore = Math.max(0, Math.min(100, moveScore + timeScore - hintPenalty))
+    
+    return {
+      totalScore,
+      moveScore,
+      timeScore,
+      hintPenalty,
+      minMoves,
+      actualMoves,
+      timeLimit,
+      actualTime
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-2 sm:p-4">
       <div className="max-w-7xl mx-auto">
@@ -944,19 +1128,21 @@ export default function PuzzleGame({ puzzleId, imagePaths, size, isSecret }: Puz
                 {leaderboard.map((entry, idx) => (
                   <div
                     key={idx}
-                    className="bg-gray-800 p-2 sm:p-3 rounded-lg flex justify-between items-center"
+                    className="bg-gray-800 p-2 sm:p-3 rounded-lg"
                   >
-                    <div className="flex items-center gap-2 sm:gap-3">
-                      <span className="text-lg sm:text-2xl font-bold text-yellow-400">#{idx + 1}</span>
-                      <div>
-                        <div className="font-bold text-sm sm:text-base">{formatTime(entry.time)}</div>
-                        <div className="text-xs sm:text-sm text-gray-400">
-                          {entry.moves}手 / {entry.hints}ヒント
-                        </div>
+                    <div className="flex justify-between items-center mb-1">
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        <span className="text-lg sm:text-2xl font-bold text-yellow-400">#{idx + 1}</span>
+                        {entry.score !== undefined && (
+                          <span className="text-xl sm:text-2xl font-bold text-yellow-300">{entry.score}点</span>
+                        )}
+                      </div>
+                      <div className="text-[10px] sm:text-xs text-gray-500">
+                        {new Date(entry.date).toLocaleDateString('ja-JP')}
                       </div>
                     </div>
-                    <div className="text-[10px] sm:text-xs text-gray-500">
-                      {new Date(entry.date).toLocaleDateString('ja-JP')}
+                    <div className="text-xs sm:text-sm text-gray-400 ml-8 sm:ml-10">
+                      {formatTime(entry.time)} · {entry.moves}手 · {entry.hints}ヒント
                     </div>
                   </div>
                 ))}
@@ -1009,9 +1195,77 @@ export default function PuzzleGame({ puzzleId, imagePaths, size, isSecret }: Puz
             <span className="material-symbols-outlined text-4xl sm:text-5xl text-yellow-400">celebration</span>
             <h2 className="text-2xl sm:text-3xl font-bold">おめでとうございます！</h2>
           </div>
-          <p className="text-lg sm:text-xl mb-2">タイム: {formatTime(elapsedTime)}</p>
-          <p className="text-base sm:text-lg mb-2">手数: {moves}</p>
-          <p className="text-base sm:text-lg mb-4">ヒント: {hints}</p>
+          
+          {/* スコア表示（大きく目立たせる） */}
+          <div className="mb-6">
+            <div className="text-center mb-2">
+              <span className="text-sm sm:text-base text-gray-400">スコア</span>
+            </div>
+            {isCalculatingScore ? (
+              <div className="flex items-center justify-center gap-2">
+                <span className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-yellow-400"></span>
+                <span className="text-2xl sm:text-3xl font-bold text-yellow-400">計算中...</span>
+              </div>
+            ) : (
+              <div className="text-5xl sm:text-6xl font-bold text-yellow-400 animate-pulse">
+                {displayScore} <span className="text-2xl sm:text-3xl">点</span>
+              </div>
+            )}
+          </div>
+          
+          {/* スコア内訳（詳細） */}
+          {scoreBreakdown && !isCalculatingScore && (
+            <div className="mb-6 space-y-2 text-left bg-gray-800/50 rounded-lg p-4">
+              <h3 className="text-base sm:text-lg font-bold mb-3 text-center border-b border-gray-700 pb-2">スコア内訳</h3>
+              
+              <div className="flex justify-between items-center text-sm sm:text-base">
+                <span className="text-gray-300">手数スコア</span>
+                <span className="font-bold text-green-400">+{scoreBreakdown.moveScore}点</span>
+              </div>
+              <div className="text-xs sm:text-sm text-gray-500 ml-4">
+                最小手数: {scoreBreakdown.minMoves}手 / 実際: {scoreBreakdown.actualMoves}手
+                {scoreBreakdown.actualMoves > scoreBreakdown.minMoves && 
+                  ` (${scoreBreakdown.actualMoves - scoreBreakdown.minMoves}手超過)`}
+              </div>
+              
+              <div className="flex justify-between items-center text-sm sm:text-base">
+                <span className="text-gray-300">時間スコア</span>
+                <span className="font-bold text-blue-400">+{scoreBreakdown.timeScore}点</span>
+              </div>
+              <div className="text-xs sm:text-sm text-gray-500 ml-4">
+                制限時間: {formatTime(scoreBreakdown.timeLimit)} / 実際: {formatTime(scoreBreakdown.actualTime)}
+                {scoreBreakdown.actualTime > scoreBreakdown.timeLimit && 
+                  ` (${formatTime(scoreBreakdown.actualTime - scoreBreakdown.timeLimit)}超過)`}
+              </div>
+              
+              {scoreBreakdown.hintPenalty > 0 && (
+                <>
+                  <div className="flex justify-between items-center text-sm sm:text-base">
+                    <span className="text-gray-300">ヒントペナルティ</span>
+                    <span className="font-bold text-red-400">-{scoreBreakdown.hintPenalty}点</span>
+                  </div>
+                  <div className="text-xs sm:text-sm text-gray-500 ml-4">
+                    ヒント使用: {hints}回 (1回 -2点)
+                  </div>
+                </>
+              )}
+              
+              <div className="border-t border-gray-700 pt-2 mt-2">
+                <div className="flex justify-between items-center text-base sm:text-lg font-bold">
+                  <span>合計スコア</span>
+                  <span className="text-yellow-400">{scoreBreakdown.totalScore}点</span>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* 基本情報 */}
+          <div className="mb-6 space-y-1 text-sm sm:text-base text-gray-300">
+            <p>タイム: {formatTime(elapsedTime)}</p>
+            <p>手数: {moves}手</p>
+            <p>ヒント: {hints}回</p>
+          </div>
+          
           <button
             onClick={shuffle}
             className="bg-blue-600 hover:bg-blue-700 px-6 py-2 sm:px-8 sm:py-3 rounded-lg font-bold transition text-sm sm:text-base"
